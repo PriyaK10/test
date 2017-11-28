@@ -13,7 +13,7 @@ This is an R Markdown document to walkthrough the code of causal impact analysis
 
 ```{r causal inference}
 # Loading daily sales starting from 10-30-2016 to 11-21-2017
-data<-read.csv("C:/Users/1542283/Desktop/final_bck.csv")
+data<-read.csv("C:/Users/priya/Desktop/final_bck.csv")
 data$X<-NULL  #dropping the first column (serial number) from the data
 head(data)
 
@@ -29,6 +29,7 @@ df.weekly$WEEK_DAY<- as.numeric(format(df.weekly$SHOPDATE,'%w'))
 # Getting last date of each week for SHOPDATE
 df.weekly$END_OF_WEEK<- df.weekly$SHOPDATE+(6-df.weekly$WEEK_DAY)
 
+head(df.weekly)
 # Dropping unwanted columns
 df.weekly$WEEK_DAY<-NULL
 df.weekly$SHOPDATE<-NULL
@@ -191,7 +192,6 @@ head(df.final.daily)
 #Matchied stores Vizualization
 library(tidyr)
 library(ggplot2)
-
 myplot<-function(t_store){
   
   df.tstore<-subset(df.final.daily, STORE_NUMBER==t_store)
@@ -203,10 +203,12 @@ myplot<-function(t_store){
     labs(x="Date",y="Privats_sales",title=paste("Trial Store ",t_store))
 }
 
+# Plotting trial Store# 8161 and its matched control groups
 s=unique(df.final.daily$STORE_NUMBER)[1]
+# Calling myplot function
 myplot(s)
 
-# Causal Impact Analysis
+# Causal Impact Analysis done for only one store as an example
 
 library(zoo)
 library(CausalImpact)
@@ -214,7 +216,7 @@ final.report<-data.frame()
 
 col_list2<-paste0(col_list1,collapse = "+")
 
-# commenting for loop to get causal effect for one store; to analyse all the stores, for loop should be decommented
+# commenting for loop to get causal effect for one store; to analyse all the stores, for loop should be made active
 
 #for(store in unique(df.final.daily$STORE_NUMBER)){
 
@@ -279,8 +281,13 @@ temp.store<- data.frame(Store=8162,
 
 final.report<-rbind(final.report,temp.store)
 #}
+# Final Report contains causal effect for each stoire
 head(final.report)
+
+# To obtain a numerical summary of the analysis, we use:
 summary(impact)
+
+# visualizing the results is to use the plot() function .
 plot(impact)
 
 ```

@@ -393,7 +393,8 @@ head(df.week,11)</code></pre>
 ## 11       8408          8367          8160          8247</code></pre>
 <pre class="r"><code>df.temp&lt;-main[,-ncol(main)]
 
-# Creating data frame to map trail store sales and control group sales
+# Once we have subset of matched control groups create a dataset to map the weekly sales of treatment and matched control groups on date basis.
+
 df.final.daily&lt;-data.frame()
 
 for(i in matched.stores$trialstore){

@@ -170,18 +170,19 @@ df.temp<-main[,-ncol(main)]
 df.final.daily<-data.frame()
 
 for(i in matched.stores$trialstore){
-  temp1<-subset(df.temp,STORE_NUMBER==i)
+  temp.trialsales<-subset(df.temp,STORE_NUMBER==i)
   matched.cg<-stack(subset(matched.stores,trialstore==i))$values[2:ncol(matched.stores)]
   for(j in matched.cg){
-    temp1.cntrl<-subset(df.temp, STORE_NUMBER==j)
-    temp1<-merge(temp1,temp1.cntrl[,c("SHOPDATE","PRIVATE_SALES")], by='SHOPDATE', all.x=T)
-    colnames(temp1)<-c("SHOPDATE","STORE_NUMBER","TrialSales",col_list1)
+    temp.cntrlsales<-subset(df.temp, STORE_NUMBER==j)
+    colnames(temp.cntrlsales)[3]=c('CG_Sales')
+    temp.trialsales<-merge(temp.trialsales,temp.cntrlsales[,c("SHOPDATE","CG_Sales")], by='SHOPDATE', all.x=T)
+    
   }
 
   df.final.daily<-rbind(df.final.daily,temp1)
 }
 
-
+colnames(df.final.daily)<-c("SHOPDATE","STORE_NUMBER","TrialSales",col_list1)
 # Cleaning outliers; removing sales with amount 0 to get continous time series data
 ndates<-df.final.daily$SHOPDATE[1:7]
 df.final.daily<-subset(df.final.daily, !SHOPDATE %in% ndates)
@@ -252,6 +253,7 @@ temp.model<- eval(parse(text = bsts_formula))
 #CAUSALIMPACT function
 impact<-CausalImpact(bsts.model = temp.model, post.period.response  = response, alpha=0.1)
 
+# Storing the causal effect for each store
 temp.store<- data.frame(Store=8162,
                         ActualSales=impact$summary$Actual[1],
                         PredictedSales=impact$summary$Pred[1],

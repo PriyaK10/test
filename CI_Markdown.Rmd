@@ -179,7 +179,7 @@ for(i in matched.stores$trialstore){
     
   }
 
-  df.final.daily<-rbind(df.final.daily,temp1)
+  df.final.daily<-rbind(df.final.daily,temp.trialsales)
 }
 
 colnames(df.final.daily)<-c("SHOPDATE","STORE_NUMBER","TrialSales",col_list1)

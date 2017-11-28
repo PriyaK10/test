@@ -1,0 +1,284 @@
+---
+title: "Causal Effect Estimate Using CausalImpact in R"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document to walkthrough the code of causal impact analysis.
+
+```{r causal inference}
+# Loading daily sales starting from 10-30-2016 to 11-21-2017
+data<-read.csv("C:/Users/1542283/Desktop/final_bck.csv")
+data$X<-NULL  #dropping the first column (serial number) from the data
+head(data)
+
+# Preparing weekly sales data to get the matched control groups
+df.weekly<-data
+
+# changing SHOPDATE to date data type
+df.weekly$SHOPDATE<-as.Date(df.weekly$SHOPDATE)
+
+#Retrieving weekday for each shopdate
+df.weekly$WEEK_DAY<- as.numeric(format(df.weekly$SHOPDATE,'%w'))
+
+# Getting last date of each week for SHOPDATE
+df.weekly$END_OF_WEEK<- df.weekly$SHOPDATE+(6-df.weekly$WEEK_DAY)
+
+# Dropping unwanted columns
+df.weekly$WEEK_DAY<-NULL
+df.weekly$SHOPDATE<-NULL
+df.weekly$DISTRICT<-NULL
+
+# Loading DPYLR package 
+library(dplyr)
+
+# Aggregating/Summing quantities on weekly basis
+df.weekly<-aggregate(. ~ END_OF_WEEK+STORE_NUMBER+GROUP, data=df.weekly, sum)
+
+# Retrieving just the Private_Sales quantity for the analysis
+df.weekly.pb<- df.weekly[,c('END_OF_WEEK','STORE_NUMBER',"GROUP",'PRIVATE_SALES')]
+
+# Arranging the data based on store number
+df.weekly.pb<-arrange(df.weekly.pb, STORE_NUMBER)
+
+#  Retrieving data only till Sept 30th 2016 for getting matched control groups
+df.weekly.pb<-df.weekly.pb[df.weekly.pb$END_OF_WEEK<'2017-10-01',]
+
+head(df.weekly.pb)
+
+#Loading TIDYR package for data manipulation
+library(tidyr)
+
+# Tranforming the data into the format required for matching function
+df.weekly.pb<-spread(df.weekly.pb,END_OF_WEEK,PRIVATE_SALES) #weekly sales data as set of predictors
+
+# Sretting store number as rownames
+row.names(df.weekly.pb)=df.weekly.pb$STORE_NUMBER
+
+# Dropping store number column
+df.weekly.pb$STORE_NUMBER<-NULL
+
+df.weekly.pb<-df.weekly.pb[,c(2:ncol(df.weekly.pb),1)]
+
+# Retrieving only first 6 rows of 6 predictors for visualization purposes.
+head(df.weekly.pb[1:6,1:6])
+
+set.seed(100)
+
+# Preparing the MATCHIT FUNCTION parameters
+col_list<-paste0(colnames(df.weekly.pb)[-ncol(df.weekly.pb)],collapse ="`+`")
+col_list
+
+# creating matchiit formla in the form: Binary Treatment Indicator ~ Set of Predictors
+match_formula_weekly=paste0("GROUP ~ `",col_list,"`")
+
+match_formula_weekly 
+
+# Removing all the NA's form the data
+df.weekly.pb<-na.omit(df.weekly.pb) 
+
+# Loading MATCHIT package to get a set of matched control groups
+library(MatchIt)
+
+# MATCHIT model
+mod_weekly<-eval(
+  parse(
+    text=paste
+    ("matchit(",match_formula_weekly,",data=df.weekly.pb, method='nearest',ratio=3, replace=T, distance='rpart',distance.options=list(method='anova'))")))
+
+mod_weekly
+
+# Matrix of matched control groups and trial stores
+df.week<-as.data.frame(mod_weekly$match.matrix)
+
+# Creating the dynamic control groups column name
+col_list1<-c()
+for(i in 1:ncol(df.week)){
+  colnames(df.week)[i]<-paste("ControlGroup",i, sep="")
+}
+
+col_list1 <-colnames(df.week) 
+col_list1
+df.week$trialstore<-row.names(df.week)
+df.week<-df.week[,c(ncol(df.week),1:ncol(df.week)-1)]
+
+# converting to numerical variable
+str(df.week)
+df.week<-data.frame(sapply(df.week, FUN=function(x) {
+  as.numeric(as.character(x))
+}))
+
+# Preparing daily data to get a regular time series data
+pb.daily<-data
+
+# Getting just the private sales data
+pb.daily<- pb.daily[,c(1,2,7,ncol(pb.daily))]
+
+# Leaving out today's date(current date) as we might get incomplete sales data for that day
+pb.daily$SHOPDATE<-as.Date(pb.daily$SHOPDATE) # changing the datatype to date
+
+pb.daily<-pb.daily[pb.daily$SHOPDATE!=max(pb.daily$SHOPDATE),]
+
+# Dataset to contain consecutive date to form regular time series, private brand sale for missing dates is put to 0
+main<-data.frame()
+
+for(i in unique(pb.daily$STORE_NUMBER)){
+  camp<- subset(pb.daily, STORE_NUMBER==i)
+  expected.dates <- seq.Date(from = min(unique(pb.daily$SHOPDATE)), 
+                             to =max(unique(pb.daily$SHOPDATE)), by = 'day')
+  for(e.date in expected.dates){
+    e.date<- as.Date(e.date, origin='1970-01-01')
+    if(!(e.date %in% as.Date(camp$SHOPDATE))){
+      new<-data.frame(STORE_NUMBER=i,SHOPDATE=e.date,PRIVATE_SALES=0.00,GROUP=unique(camp$GROUP))
+      camp<- rbind(camp,new)
+      
+    }
+    
+  }
+  main<- rbind(main,camp)
+}
+
+head(main)
+
+#replace any NA cells with 0 in sales column
+main[is.na(main$PRIVATE_SALES),c('PRIVATE_SALES')]=0
+
+# Loading TIDYR package
+library(tidyr)
+pb.daily<-spread(main, SHOPDATE,PRIVATE_SALES)
+row.names(pb.daily)=pb.daily$STORE_NUMBER
+pb.daily$STORE_NUMBER=NULL
+pb.daily<-pb.daily[,c(2:ncol(pb.daily),1)]
+
+head(pb.daily[1:6,1:6])
+
+# Preparing dataset to get daily sales for treatment group and control groups
+
+# Final Matched Stores matrix 
+matched.stores<-df.week
+
+head(df.week,11)
+
+df.temp<-main[,-ncol(main)]
+
+# Creating data frame to map trail store sales and control group sales
+df.final.daily<-data.frame()
+
+for(i in matched.stores$trialstore){
+  temp1<-subset(df.temp,STORE_NUMBER==i)
+  matched.cg<-stack(subset(matched.stores,trialstore==i))$values[2:ncol(matched.stores)]
+  for(j in matched.cg){
+    temp1.cntrl<-subset(df.temp, STORE_NUMBER==j)
+    temp1<-merge(temp1,temp1.cntrl[,c("SHOPDATE","PRIVATE_SALES")], by='SHOPDATE', all.x=T)
+    colnames(temp1)<-c("SHOPDATE","STORE_NUMBER","TrialSales",col_list1)
+  }
+
+  df.final.daily<-rbind(df.final.daily,temp1)
+}
+
+
+# Cleaning outliers; removing sales with amount 0 to get continous time series data
+ndates<-df.final.daily$SHOPDATE[1:7]
+df.final.daily<-subset(df.final.daily, !SHOPDATE %in% ndates)
+head(df.final.daily)
+
+#Matchied stores Vizualization
+library(tidyr)
+library(ggplot2)
+
+myplot<-function(t_store){
+  
+  df.tstore<-subset(df.final.daily, STORE_NUMBER==t_store)
+  df.tstore$STORE_NUMBER<-NULL
+  df.tstore<-gather(df.tstore,key=group,value=sales,TrialSales,ControlGroup1,ControlGroup2,
+                    ControlGroup3)
+  df.tstore1<-subset(df.tstore, sales!=0)
+  ggplot(df.tstore1, aes(x=SHOPDATE, y=sales,group=group, color=group))+geom_line()+
+    labs(x="Date",y="Privats_sales",title=paste("Trial Store ",t_store))
+}
+
+s=unique(df.final.daily$STORE_NUMBER)[1]
+myplot(s)
+
+# Causal Impact Analysis
+
+library(zoo)
+library(CausalImpact)
+final.report<-data.frame()
+
+col_list2<-paste0(col_list1,collapse = "+")
+
+# commenting for loop to get causal effect for one store; to analyse all the stores, for loop should be decommented
+
+#for(store in unique(df.final.daily$STORE_NUMBER)){
+
+daily.s1<-df.final.daily[df.final.daily$STORE_NUMBER==8162,]
+
+daily.s1$STORE_NUMBER<-NULL
+daily.s1$SHOPDATE=as.Date(daily.s1$SHOPDATE)
+
+daily.s1<- zoo(daily.s1[,c('TrialSales','ControlGroup1','ControlGroup2','ControlGroup3')], daily.s1$SHOPDATE)
+
+# Defining program start and end period
+effect.start<-as.Date("2017-10-01")
+effect.end<-as.Date(max(index(daily.s1)))
+
+# Defining pre and post period
+pre.period<-as.Date(c(min(index(daily.s1)),effect.start-1)) #pre period: 10-30-2016 to 09-30-2017
+post.period<- as.Date(c(effect.start,effect.end)) # 10-01-2017 to 11-21-2017
+
+# Storing response of trial stores in post period
+response<- as.numeric(daily.s1[,1][index(daily.s1) %in% as.Date(post.period[1]:post.period[2])])
+
+daily.s1[,1][index(daily.s1) %in% as.Date(post.period[1]:post.period[2])]<-NA
+
+#BUILDING BSTS MODEL
+
+ss <- AddAutoAr(list(), daily.s1[,1]) # adding a sparse Ar(p) process to state distribution
+ss<- AddSeasonal(ss, y=daily.s1[,1], nseasons=7) # Adding Seasonal component
+ss<- AddNamedHolidays(ss, named.holidays = NamedHolidays(), y=daily.s1[,1]) # control for holidays
+
+# Creating the formula for bsts model
+# MCMC iterations : 1000
+bsts_formula<-paste0("bsts(",paste0("TrialSales ~ ", col_list2),",data = daily.s1, ss, niter = 2000,seed=100, ping = 0)")
+
+temp.model<- eval(parse(text = bsts_formula))
+
+#CAUSALIMPACT function
+impact<-CausalImpact(bsts.model = temp.model, post.period.response  = response, alpha=0.1)
+
+temp.store<- data.frame(Store=8162,
+                        ActualSales=impact$summary$Actual[1],
+                        PredictedSales=impact$summary$Pred[1],
+                        CumulativeActual=impact$summary$Actual[2],
+                        CumulativePredicted=impact$summary$Pred[2],
+                        Predicted_Low=impact$summary$Pred.lower[1],
+                        Predicted_Upper=impact$summary$Pred.upper[1],
+                        cum.CI95.low=impact$summary$Pred.lower[2],
+                        cum.CI95.high=impact$summary$Pred.upper[2],
+                        avg.pred.sd=impact$summary$Pred.sd[1],
+                        cum.pred.sd=impact$summary$Pred.sd[2],
+                        AbsoluteEffect_Low=impact$summary$AbsEffect.lower[1],
+                        AbsoluteEffect_Mid=impact$summary$AbsEffect[1],
+                        AbsoluteEffect_High=impact$summary$AbsEffect.upper[1],
+                        cum.abseffect.low=impact$summary$AbsEffect.lower[2],
+                        cum.abseffect.mid=impact$summary$AbsEffect[2],
+                        cum.abseffect.high=impact$summary$AbsEffect.upper[2],
+                        Relative.Effect=impact$summary$RelEffect[1]*100,
+                        probability=1-impact$summary$p[1],
+                        rsquare=summary(impact$model$bsts.model)$rsquare,
+                        start.period=post.period[1],
+                        end.period=post.period[2])
+
+final.report<-rbind(final.report,temp.store)
+#}
+head(final.report)
+summary(impact)
+plot(impact)
+
+```
